@@ -1,0 +1,20 @@
+# Python 垃圾
+__pycache__/
+*.py[cod]
+*.class
+venv/
+.env
+.DS_Store
+*.log
+logs/
+tmp/
+
+# 前端垃圾 (非常大，千万别传)
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+*.local
+
+# IDE 配置
+.vscode/
+.idea/

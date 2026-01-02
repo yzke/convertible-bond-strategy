@@ -1,0 +1,25 @@
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import { resolve } from 'path'
+
+export default defineConfig({
+  plugins: [vue()],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, 'src')
+    }
+  },
+  server: {
+    // ✅ 关键修改：使用 '::' 监听所有 IPv6 地址 (通常也兼容 IPv4)
+    host: '::', 
+    port: 48001,     
+    proxy: {
+      '/api': {
+        // 后端代理地址。
+        // 如果后端在同一台机，用 [::1] (IPv6 localhost) 或 127.0.0.1 均可
+        target: 'http://127.0.0.1:48000', 
+        changeOrigin: true,
+      }
+    }
+  }
+})

@@ -1,0 +1,35 @@
+# 策略配置
+STRATEGY:
+  MAX_SIZE: 15  # 持仓数量上限
+  MIN_SCALE: 0.5  # 最小剩余规模(亿元)
+  MAX_SCALE: 15.0  # 最大剩余规模(亿元)
+  RANKING_METHOD: 'double_low'  # 排名算法
+
+# 风控参数
+RISK:
+  AVG_PREMIUM_WARNING: 0.25  # 债底溢价率报警线
+  AVG_PREMIUM_DANGER: 0.35  # 债底溢价率清仓线
+
+# 数据库配置
+DB:
+  PATH: 'data/bonds.db'
+
+# API配置
+API:
+  HOST: '127.0.0.1'
+  PORT: 8000
+  DEBUG: false
+
+# 邮件配置
+EMAIL:
+  ENABLED: false
+  SMTP_SERVER: 'smtp.qq.com'
+  SMTP_PORT: 587
+  SENDER: 'your_email@qq.com'
+  PASSWORD: 'your_password'
+  RECIPIENT: 'recipient@qq.com'
+
+# 任务调度
+SCHEDULE:
+  MARKET_DATA_UPDATE: '10:00'  # 每日更新市场数据时间
+  STRATEGY_RUN: '14:30'  # 每日运行策略时间
