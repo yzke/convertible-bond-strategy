@@ -191,6 +191,7 @@ import { ref, nextTick, onBeforeUnmount, onMounted } from 'vue' // ✅ 引入 on
 import { VideoPlay } from '@element-plus/icons-vue'
 import { runBacktest as runBacktestApi, type BacktestConfig, type BacktestResult } from '@/api/backtest'
 import * as echarts from 'echarts'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const loading = ref(false)
 const chartRef = ref<HTMLElement>()
@@ -212,20 +213,43 @@ const config = ref<BacktestConfig>({
 
 const result = ref<BacktestResult | null>(null)
 
-const runBacktest = async () => {
-  loading.value = true
-  try {
-    const data = await runBacktestApi(config.value)
-    result.value = data
-    
-    await nextTick()
-    renderChart()
-  } catch (error) {
-    console.error(error) // ✅ 恢复错误打印
-  } finally {
-    loading.value = false
-  }
+// 记得在文件顶部确保引入了这两个组件
+// import { ElMessage, ElMessageBox } from 'element-plus' 
+
+const runBacktest = () => {
+  // 1. 弹出警告框
+  ElMessageBox.confirm(
+    '当前系统尚未接入历史数据源（如数据库或CSV归档）。\n\n本次回测将使用【随机模拟数据】生成结果，仅用于演示系统功能流程，不代表真实策略表现。',
+    '⚠️ 模拟数据提示',
+    {
+      confirmButtonText: '我知道了，继续',
+      cancelButtonText: '取消',
+      type: 'warning',
+    }
+  ).then(async () => {
+    // 2. 用户点击“确定”后，执行原来的逻辑
+    loading.value = true
+    try {
+      const data = await runBacktestApi(config.value)
+      result.value = data
+
+      await nextTick()
+      renderChart()
+      
+      // 加个提示让体验更好
+      ElMessage.success('回测已完成 (基于模拟数据)')
+    } catch (error) {
+      console.error(error)
+      ElMessage.error('回测运行失败')
+    } finally {
+      loading.value = false
+    }
+  }).catch(() => {
+    // 3. 用户点击“取消”
+    ElMessage.info('已取消回测')
+  })
 }
+
 
 const resetConfig = () => {
   config.value = {
