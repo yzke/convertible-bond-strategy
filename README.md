@@ -6,9 +6,17 @@
 ## 技术栈
 - Python 3.9+
 - FastAPI (Web API)
-- Akshare (数据源)
+- Akshare (数据源，集思录全量数据)
+- Efinance (备用数据源)
+- PyCryptodome (AES 加密登录)
 - SQLite (数据库)
 - Tailscale (网络连接)
+
+## 数据源说明
+- **主要数据源**：集思录 (jisilu.cn)，通过 akshare + Cookie 获取 322 只可转债全量数据
+- **自动登录**：`jisilu_login.py` 实现 AES-128-CBC 加密登录，Cookie 自动刷新
+- **备用数据源**：东方财富 (efinance)，当 akshare 不足 50 条时自动回退
+- **环境变量**：需设置 `JISILU_USER` / `JISILU_PASS`（集思录账号密码）
 
 # 📋 可转债双低策略系统 - 最终功能汇总
 
@@ -35,14 +43,26 @@
   - 支持多数据源扩展
   
 - ✅ **Akshare数据源** (`akshare_provider.py`)
-  - 获取实时转债数据
+  - 获取实时转债数据（322只全量，集思录源）
+  - 自动 Cookie 管理：失效自动刷新登录
   - 字段映射（中文→英文）
   - 百分比字段清洗
   - ST/退市转债过滤
+  - 智能重试：Cookie 过期自动重新加密登录
   
+- ✅ **东方财富备用源** (`efinance_provider.py`)
+  - Akshare 不足 50 条时自动回退
+  - 提供基础行情数据
+
+- ✅ **集思录自动登录** (`jisilu_login.py`)
+  - AES-128-CBC 加密登录，无需浏览器
+  - Cookie 持久化存储 + 自动刷新
+  - 环境变量管理账号密码
+
 - ✅ **真实数据提供者** (`real_data_provider.py`)
-  - 整合AkshareProvider
-  - 提供统一的数据获取接口
+  - 整合 Akshare + Efinance
+  - Akshare ≥50条时优先使用全量数据
+  - 故障自动回退
   
 - ✅ **历史数据提供者** (`historical_data_provider.py`)
   - 模拟历史数据生成
@@ -424,9 +444,11 @@ convertible-bond-strategy/
 ├── data/                           # 数据层
 │   ├── __init__.py
 │   ├── provider.py                # 数据源抽象基类
-│   ├── akshare_provider.py        # Akshare数据源实现
-│   ├── real_data_provider.py      # 真实数据提供者
+│   ├── akshare_provider.py        # Akshare数据源（集思录全量，自动Cookie）
+│   ├── efinance_provider.py       # 东方财富备用数据源
+│   ├── real_data_provider.py      # 真实数据提供者（akshare优先）
 │   └── historical_data_provider.py # 历史数据提供者
+├── jisilu_login.py                 # 集思录自动登录（AES加密+Cookie刷新）
 ├── strategy/                       # 策略层
 │   ├── __init__.py
 │   ├── base_strategy.py            # 策略抽象基类
@@ -483,20 +505,27 @@ convertible-bond-strategy/
 
 ## 🚀 启动和使用
 
+### 配置环境变量
+
+```bash
+export JISILU_USER='your_phone_or_email'
+export JISILU_PASS='your_password'
+```
+
 ### 启动API服务
 
 ```bash
 # 确保虚拟环境已激活
-source venv/bin/activate
+source .venv/bin/activate
 
-# 启动服务
-uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
+# 启动服务（端口 48000）
+uvicorn api.app:app --host 0.0.0.0 --port 48000
 ```
 
 ### 访问API文档
 
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+- Swagger UI: http://localhost:48000/docs
+- ReDoc: http://localhost:48000/redoc
 
 ### 健康检查
 
