@@ -9,6 +9,20 @@ from data.efinance_provider import EfinanceProvider
 
 logger = logging.getLogger(__name__)
 
+# 列名映射（兼容 controller 旧接口）
+COLUMN_MAPPING = {
+    '成交额': ['amount', '成交额', 'volume', '成交量', 'turnover_amount'],
+    'rating': ['rating', '评级', '信用评级'],
+    '双低': ['双低', 'dual_low', 'double_low']
+}
+
+
+def get_column_name(df: pd.DataFrame, possible_names: list) -> str:
+    for name in possible_names:
+        if name in df.columns:
+            return name
+    return ""
+
 
 class RealDataProvider:
 
@@ -38,12 +52,16 @@ class RealDataProvider:
             logger.warning(f"akshare 失败: {e}")
 
         # Step 3: Merge
-        if not df_ef.empty and not df_ak.empty:
-            # Use efinance as base, supplement with akshare premium_rate
+        # akshare is now the primary source (322 bonds with premium_rate)
+        # Only use efinance as supplement if akshare returns too few
+        if not df_ak.empty and len(df_ak) >= 50:
+            df = df_ak
+            logger.info(f"使用 akshare 全量数据: {len(df)} 只")
+        elif not df_ef.empty and not df_ak.empty:
+            # Fallback merge
             ak_cols = ['code', 'premium_rate', 'remain_amount', 'double_low']
             ak_supp = df_ak[[c for c in ak_cols if c in df_ak.columns]].copy()
             df = df_ef.merge(ak_supp, on='code', how='left', suffixes=('', '_ak'))
-            # Prefer akshare remain_amount if available
             if 'remain_amount_ak' in df.columns:
                 df['remain_amount'] = df['remain_amount_ak'].fillna(df['remain_amount'])
                 df = df.drop(columns=['remain_amount_ak'])
