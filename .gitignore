@@ -18,3 +18,4 @@ frontend/dist-ssr/
 # IDE 配置
 .vscode/
 .idea/
+jisilu_cookies.json

@@ -1,131 +1,79 @@
 """
-真实数据提供者
-整合AkshareProvider，提供统一的接口
-
-修正内容：
-1. ✅ 添加列名映射机制
-2. ✅ 增强列名验证
-3. ✅ 改进错误处理
+真实数据提供者 (v2)
+整合 EfinanceProvider + AkshareProvider，混合数据源
 """
 import pandas as pd
 import logging
 from data.akshare_provider import AkshareProvider
+from data.efinance_provider import EfinanceProvider
 
-# 配置日志
 logger = logging.getLogger(__name__)
-
-# 列名映射
-COLUMN_MAPPING = {
-    '成交额': ['amount', '成交额', 'volume', '成交量'],
-    'rating': ['rating', '评级', '信用评级'],
-    '双低': ['双低', 'dual_low', 'double_low']
-}
-
-
-def get_column_name(df: pd.DataFrame, possible_names: list) -> str:
-    """
-    获取实际存在的列名
-    
-    Args:
-        df: 数据DataFrame
-        possible_names: 可能的列名列表
-        
-    Returns:
-        str: 实际存在的列名，如果都不存在则返回空字符串
-    """
-    for name in possible_names:
-        if name in df.columns:
-            return name
-    return ""
 
 
 class RealDataProvider:
-    """真实数据提供者"""
-    
+
     def __init__(self):
-        """初始化真实数据提供者"""
         self.akshare_provider = AkshareProvider()
-    
+        self.efinance_provider = EfinanceProvider()
+
     def fetch_convertible_bonds(self) -> pd.DataFrame:
-        """
-        获取可转债实时数据
-        
-        Returns:
-            pd.DataFrame: 可转债数据，包含列：
-                - code: 转债代码
-                - name: 转债名称
-                - price: 转债价格
-                - premium_rate: 溢价率（%）
-                - remain_amount: 剩余规模（亿元）
-                - rating: 评级
-                - turnover_rate: 换手率（%）
-                - double_low: 双低值（如果数据源提供）
-        """
-        logger.info("="*60)
-        logger.info("开始获取可转债实时数据...")
-        logger.info("="*60)
-        
+        logger.info("=" * 60)
+        logger.info("开始获取可转债数据 (efinance + akshare 混合)...")
+        logger.info("=" * 60)
+
+        # Step 1: efinance for broad universe (price, rating, stock info)
+        df_ef = pd.DataFrame()
         try:
-            # 使用AkshareProvider获取数据
-            df = self.akshare_provider.get_bond_list()
-            
-            if df.empty:
-                logger.error("无法获取可转债数据")
-                return pd.DataFrame()
-            
-            # 验证列名
-            required_columns = ['code', 'name', 'price', 'premium_rate']
-            missing_columns = [col for col in required_columns if col not in df.columns]
-            
-            if missing_columns:
-                logger.error(f"数据缺少必要列: {missing_columns}")
-                return pd.DataFrame()
-            
-            logger.info(f"成功获取 {len(df)} 只可转债数据")
-            logger.info("="*60)
-            
-            return df
-        
+            df_ef = self.efinance_provider.get_bond_list()
+            logger.info(f"efinance: {len(df_ef)} 只")
         except Exception as e:
-            logger.error(f"获取可转债数据时发生错误: {e}", exc_info=True)
+            logger.warning(f"efinance 失败，回退纯 akshare: {e}")
+
+        # Step 2: akshare for premium_rate, remain_amount, double_low
+        df_ak = pd.DataFrame()
+        try:
+            df_ak = self.akshare_provider.get_bond_list()
+            logger.info(f"akshare: {len(df_ak)} 只")
+        except Exception as e:
+            logger.warning(f"akshare 失败: {e}")
+
+        # Step 3: Merge
+        if not df_ef.empty and not df_ak.empty:
+            # Use efinance as base, supplement with akshare premium_rate
+            ak_cols = ['code', 'premium_rate', 'remain_amount', 'double_low']
+            ak_supp = df_ak[[c for c in ak_cols if c in df_ak.columns]].copy()
+            df = df_ef.merge(ak_supp, on='code', how='left', suffixes=('', '_ak'))
+            # Prefer akshare remain_amount if available
+            if 'remain_amount_ak' in df.columns:
+                df['remain_amount'] = df['remain_amount_ak'].fillna(df['remain_amount'])
+                df = df.drop(columns=['remain_amount_ak'])
+            logger.info(f"合并后: {len(df)} 只，{df['premium_rate'].notna().sum()} 只有溢价率")
+        elif not df_ef.empty:
+            df = df_ef
+            logger.info("仅 efinance 数据")
+        elif not df_ak.empty:
+            df = df_ak
+            logger.info("仅 akshare 数据")
+        else:
+            logger.error("无法获取任何数据")
             return pd.DataFrame()
-    
+
+        # Drop bonds without minimum required fields
+        df = df.dropna(subset=['code', 'name', 'price'])
+
+        logger.info(f"最终: {len(df)} 只可转债")
+        logger.info("=" * 60)
+        return df
+
     def fetch_bond_info(self, code: str) -> pd.DataFrame:
-        """
-        获取单只可转债详细信息
-        
-        修正：添加列名验证
-        
-        Args:
-            code: 转债代码
-            
-        Returns:
-            pd.DataFrame: 转债详细信息
-        """
         logger.info(f"获取转债 {code} 的详细信息...")
-        
         try:
             import akshare as ak
             df = ak.bond_cb_jsl()
-            
             if df.empty:
-                logger.warning(f"未找到转债 {code} 的信息")
                 return pd.DataFrame()
-            
-            # 验证列名
-            logger.debug(f"ak.bond_cb_jsl() 返回的列名: {list(df.columns)}")
-            
-            # 筛选指定转债
             bond_df = df[df['代码'] == code]
-            
-            if bond_df.empty:
-                logger.warning(f"未找到转债 {code} 的信息")
-                return pd.DataFrame()
-            
-            logger.info(f"成功获取转债 {code} 的信息")
             return bond_df
-        
         except Exception as e:
-            logger.error(f"获取转债 {code} 信息时发生错误: {e}", exc_info=True)
+            logger.error(f"获取失败: {e}")
             return pd.DataFrame()
-

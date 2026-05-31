@@ -1,19 +1,17 @@
 """
-Akshare数据源实现 (集思录Cookie增强版)
+Akshare数据源实现 (集思录Cookie增强版 + 自动登录刷新)
 """
 import akshare as ak
 import pandas as pd
 import logging
 from data.provider import DataProvider
+from jisilu_login import get_valid_cookie, refresh_cookie
 
 # 配置日志
 logger = logging.getLogger(__name__)
 
 class AkshareProvider(DataProvider):
-    """Akshare数据提供者"""
-
-    # 🔴 1. 这里是专门放Cookie的地方，稍后请把你的Cookie填在引号里
-    COOKIE = "kbzw__Session=uchqq171pafm90ihlg70nh5ms0; Hm_lvt_164fe01b1433a19b507595a43bf58262=1767360371; HMACCOUNT=2437F41BDA276B1B; kbz_newcookie=1; kbzw__user_login=7Obd08_P1ebax9aXwZqomaippbGTqYKvpuXK7N_u0ejF1dSesJaowqff1s3bo6mX25WqqNSpxNPFp7CozN7NrsWpmKqYrqXW2cXS1qCbq56tmq2WmLKgubXOvp-qrJ-wn62SqpWnmK6ltrG_0aTC2PPV487XkKylo5iJx8ri3eTg7IzFtpaSp6Wjs4HHyuKvqaSZ5K2Wn4G45-PkxsfG1sTe3aihqpmklK2Xm8OpxK7ApZXV4tfcgr3G2uLioYGzyebo4s6onauVpJGlp6GogcPC2trn0qihqpmklK2XuNzIn5KorKOZp5ylkg..; Hm_lpvt_164fe01b1433a19b507595a43bf58262=1767360448" 
+    """Akshare数据提供者 — 自动管理集思录 Cookie"""
 
     # 类常量：过滤规则
     FILTER_KEYWORDS = ['ST', '*ST', '退']
@@ -47,45 +45,65 @@ class AkshareProvider(DataProvider):
 
     def get_bond_list(self) -> pd.DataFrame:
         """
-        获取所有转债基础信息
+        获取所有转债基础信息（自动管理 Cookie）
         """
+        # 获取有效 cookie（自动加载或重新登录）
         try:
-            logger.info("正在获取转债列表...")
-            
-            # 🔴 2. 核心修改：这里加入了 cookie 参数
-            # 如果 COOKIE 为空，akshare 会尝试用默认方式（可能只有30条）
-            # 如果 COOKIE 有值，就能获取全量数据
-            df = ak.bond_cb_jsl(cookie=self.COOKIE)
-
-            if df is None or df.empty:
-                logger.warning("获取到的数据为空")
-                return pd.DataFrame()
-
-            logger.info(f"获取到 {len(df)} 条转债原始数据")
-
-            # 重命名列
-            existing_mapping = {k: v for k, v in self.COLUMN_MAPPING.items() if k in df.columns}
-            df = df.rename(columns=existing_mapping)
-
-            # 稳健的百分比字段清洗
-            df = self._clean_percentage_fields(df)
-
-            # 过滤掉ST等特殊转债
-            df = self._filter_special_bonds(df)
-
-            # 移除空值过多的行
-            df = df.dropna(subset=['code', 'name', 'price'])
-
-            logger.info(f"数据清洗后剩余 {len(df)} 条有效数据")
-
-            return df
-
-        except ImportError as e:
-            logger.error(f"缺少依赖库: {e}")
-            return pd.DataFrame()
+            cookie = get_valid_cookie()
         except Exception as e:
-            logger.error(f"获取转债列表失败: {e}", exc_info=True)
+            logger.error(f"Cookie 加载失败: {e}")
             return pd.DataFrame()
+
+        # 尝试获取数据，cookie 失效时自动刷新重试
+        for attempt in range(2):
+            try:
+                logger.info(f"正在获取转债列表{' (自动刷新)' if attempt > 0 else ''} ...")
+                df = ak.bond_cb_jsl(cookie=cookie)
+
+                if df is None or df.empty:
+                    logger.warning("获取到的数据为空")
+                    if attempt == 0:
+                        cookie = refresh_cookie()
+                    continue
+
+                # 如果数据太少（<50条），说明 cookie 已失效
+                if len(df) < 50 and attempt == 0:
+                    logger.warning(f"仅获取到 {len(df)} 条数据，Cookie 可能已过期，尝试刷新...")
+                    cookie = refresh_cookie()
+                    continue
+
+                logger.info(f"获取到 {len(df)} 条转债原始数据")
+                break
+
+            except Exception as e:
+                logger.error(f"获取转债列表失败 (attempt {attempt+1}/2): {e}")
+                if attempt == 0:
+                    try:
+                        cookie = refresh_cookie()
+                    except Exception:
+                        pass
+                else:
+                    return pd.DataFrame()
+
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        # 重命名列
+        existing_mapping = {k: v for k, v in self.COLUMN_MAPPING.items() if k in df.columns}
+        df = df.rename(columns=existing_mapping)
+
+        # 稳健的百分比字段清洗
+        df = self._clean_percentage_fields(df)
+
+        # 过滤掉ST等特殊转债
+        df = self._filter_special_bonds(df)
+
+        # 移除空值过多的行
+        df = df.dropna(subset=['code', 'name', 'price'])
+
+        logger.info(f"数据清洗后剩余 {len(df)} 条有效数据")
+
+        return df
 
     def _clean_percentage_fields(self, df: pd.DataFrame) -> pd.DataFrame:
         percentage_fields = ['premium_rate', 'turnover_rate']
